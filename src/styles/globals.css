@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-100;
+}
+
+.story-progress-bar {
+  @apply h-1 bg-white/30 rounded-full overflow-hidden;
+}
+
+.story-progress-bar-fill {
+  @apply h-full bg-white transition-all duration-[3000ms] ease-linear;
+}
