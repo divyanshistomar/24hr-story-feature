@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Story } from "../types";
 
 interface StoryViewerProps {
@@ -9,35 +9,99 @@ interface StoryViewerProps {
 
 const STORY_DURATION = 3000; // 3 seconds in milliseconds
 
-const StoryViewer: React.FC<StoryViewerProps> = ({
-  stories,
-  initialIndex,
-  onClose,
-}) => {
+// Memoized Progress Bar Component
+const ProgressBar = memo(({ 
+  index, 
+  currentIndex, 
+  isPlaying 
+}: { 
+  index: number; 
+  currentIndex: number; 
+  isPlaying: boolean;
+}) => (
+  <div className="h-0.5 flex-1 mx-0.5">
+    <div className="h-full bg-white/30 rounded-full overflow-hidden">
+      <div
+        className="h-full bg-white"
+        style={{
+          width: `${
+            index < currentIndex
+              ? "100%"
+              : index === currentIndex
+              ? isPlaying
+                ? "100%"
+                : "0%"
+              : "0%"
+          }`,
+          transition:
+            index === currentIndex && isPlaying
+              ? `width ${STORY_DURATION}ms linear`
+              : "none",
+        }}
+      />
+    </div>
+  </div>
+));
+
+ProgressBar.displayName = 'ProgressBar';
+
+// Memoized Navigation Button Component
+const NavigationButton = memo(({ 
+  direction, 
+  onClick 
+}: { 
+  direction: 'left' | 'right'; 
+  onClick: () => void;
+}) => (
+  <button
+    className="p-4 text-white/50 hover:text-white transition-colors"
+    onClick={onClick}
+    aria-label={direction === 'left' ? "Previous story" : "Next story"}
+  >
+    <svg
+      className="w-8 h-8"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d={direction === 'left' ? "M15 19l-7-7 7-7" : "M9 5l7 7-7 7"}
+      />
+    </svg>
+  </button>
+));
+
+NavigationButton.displayName = 'NavigationButton';
+
+const StoryViewer: React.FC<StoryViewerProps> = memo(({ stories, initialIndex, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [isPlaying, setIsPlaying] = useState(true);
   const progressTimeout = useRef<number>();
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(
-    null
-  );
-  const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(
-    null
-  );
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+  const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    if (isPlaying) {
-      startProgress();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      if (progressTimeout.current) {
-        window.clearTimeout(progressTimeout.current);
+  // Function to mark story as viewed
+  const markStoryAsViewed = useCallback((index: number) => {
+    const savedStories = localStorage.getItem("stories");
+    if (savedStories) {
+      const allStories = JSON.parse(savedStories);
+      const storyToUpdate = allStories.find((s: Story) => s.id === stories[index].id);
+      if (storyToUpdate) {
+        storyToUpdate.viewed = true;
+        localStorage.setItem("stories", JSON.stringify(allStories));
       }
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [currentIndex, isPlaying]);
+    }
+  }, [stories]);
 
-  const startProgress = () => {
+  // Mark story as viewed when index changes
+  useEffect(() => {
+    markStoryAsViewed(currentIndex);
+  }, [currentIndex, markStoryAsViewed]);
+
+  const startProgress = useCallback(() => {
     if (progressTimeout.current) {
       window.clearTimeout(progressTimeout.current);
     }
@@ -49,35 +113,48 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         onClose();
       }
     }, STORY_DURATION);
-  };
+  }, [currentIndex, stories.length, onClose]);
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "ArrowLeft" && currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-    } else if (e.key === "ArrowRight" && currentIndex < stories.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else if (e.key === "Escape") {
-      onClose();
+  useEffect(() => {
+    if (isPlaying) {
+      startProgress();
     }
-  };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && currentIndex > 0) {
+        setCurrentIndex((prev) => prev - 1);
+      } else if (e.key === "ArrowRight" && currentIndex < stories.length - 1) {
+        setCurrentIndex((prev) => prev + 1);
+      } else if (e.key === "Escape") {
+        onClose();
+      }
+    };
 
-  const handleTouchStart = (e: React.TouchEvent) => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      if (progressTimeout.current) {
+        window.clearTimeout(progressTimeout.current);
+      }
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [currentIndex, isPlaying, stories.length, onClose, startProgress]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
     setIsPlaying(false);
     setTouchEnd(null);
     setTouchStart({
       x: e.touches[0].clientX,
       y: e.touches[0].clientY,
     });
-  };
+  }, []);
 
-  const handleTouchMove = (e: React.TouchEvent) => {
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
     setTouchEnd({
       x: e.touches[0].clientX,
       y: e.touches[0].clientY,
     });
-  };
+  }, []);
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = useCallback(() => {
     setIsPlaying(true);
     if (!touchStart || !touchEnd) return;
 
@@ -94,7 +171,19 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
 
     setTouchStart(null);
     setTouchEnd(null);
-  };
+  }, [touchStart, touchEnd, currentIndex, stories.length]);
+
+  const handlePrevious = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex((prev) => prev - 1);
+    }
+  }, [currentIndex]);
+
+  const handleNext = useCallback(() => {
+    if (currentIndex < stories.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    }
+  }, [currentIndex, stories.length]);
 
   return (
     <div
@@ -106,28 +195,12 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
       {/* Progress bars */}
       <div className="absolute top-0 left-0 right-0 flex p-2 z-10">
         {stories.map((_, idx) => (
-          <div key={idx} className="h-0.5 flex-1 mx-0.5">
-            <div className="h-full bg-white/30 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-white"
-                style={{
-                  width: `${
-                    idx < currentIndex
-                      ? "100%"
-                      : idx === currentIndex
-                      ? isPlaying
-                        ? "100%"
-                        : "0%"
-                      : "0%"
-                  }`,
-                  transition:
-                    idx === currentIndex && isPlaying
-                      ? `width ${STORY_DURATION}ms linear`
-                      : "none",
-                }}
-              />
-            </div>
-          </div>
+          <ProgressBar
+            key={idx}
+            index={idx}
+            currentIndex={currentIndex}
+            isPlaying={isPlaying}
+          />
         ))}
       </div>
 
@@ -152,52 +225,16 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
         </svg>
       </button>
 
-      {/* Navigation arrows */}
+      {/* Left/Right Navigation */}
       <div className="absolute inset-y-0 left-0 flex items-center z-20">
         {currentIndex > 0 && (
-          <button
-            className="p-4 text-white/50 hover:text-white transition-colors"
-            onClick={() => setCurrentIndex((prev) => prev - 1)}
-            aria-label="Previous story"
-          >
-            <svg
-              className="w-8 h-8"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
+          <NavigationButton direction="left" onClick={handlePrevious} />
         )}
       </div>
 
       <div className="absolute inset-y-0 right-0 flex items-center z-20">
         {currentIndex < stories.length - 1 && (
-          <button
-            className="p-4 text-white/50 hover:text-white transition-colors"
-            onClick={() => setCurrentIndex((prev) => prev + 1)}
-            aria-label="Next story"
-          >
-            <svg
-              className="w-8 h-8"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
+          <NavigationButton direction="right" onClick={handleNext} />
         )}
       </div>
 
@@ -219,6 +256,8 @@ const StoryViewer: React.FC<StoryViewerProps> = ({
       </div>
     </div>
   );
-};
+});
+
+StoryViewer.displayName = 'StoryViewer';
 
 export default StoryViewer;
